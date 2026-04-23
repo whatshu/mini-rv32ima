@@ -24,7 +24,7 @@ Usage:
       Run a command in /work.
 
 Options:
-  --rebuild      Force rebuilding the Docker image.
+  -r, --rebuild  Force rebuilding the Docker image.
   -h, --help     Show this help.
 EOF
 }
@@ -39,7 +39,7 @@ while (($#)); do
             fi
             break
             ;;
-        --rebuild)
+        -r|--rebuild)
             FORCE_REBUILD=1
             shift
             ;;
