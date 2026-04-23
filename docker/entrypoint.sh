@@ -13,13 +13,11 @@ export all_proxy="${all_proxy:-${ALL_PROXY:-}}"
 export no_proxy="${no_proxy:-${NO_PROXY:-}}"
 
 WORKDIR="${WORKDIR:-/work}"
-TARGET="${1:-${MINIRV32IMA_TARGET:-everything}}"
 FIX_WGET="${MINIRV32IMA_FIX_WGET:-1}"
 
 cd "${WORKDIR}"
 
 echo "[entrypoint] workdir: ${WORKDIR}"
-echo "[entrypoint] target : ${TARGET}"
 
 if [[ -n "${HTTP_PROXY}" ]]; then
     echo "[entrypoint] HTTP proxy detected"
@@ -52,10 +50,16 @@ Available targets:
 EOF
 }
 
-case "${TARGET}" in
+if (($# == 0)); then
+    set -- make "${MINIRV32IMA_TARGET:-everything}"
+fi
+
+echo "[entrypoint] command: $*"
+
+case "${1:-}" in
     everything|toolchain|testdlimage|testbare)
         patch_wget_passive_ftp
-        exec make "${TARGET}"
+        exec make "$1"
         ;;
     shell|bash)
         patch_wget_passive_ftp

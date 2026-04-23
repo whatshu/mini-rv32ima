@@ -1,0 +1,51 @@
+# Buildroot and downloaded source trees
+/buildroot/
+/riscv-tests/
+/experiments/emdoom/embeddeddoom/
+
+# Top-level generated files
+/configs/minimal.dtb
+/dtb.dtb
+/dtb.dts
+
+# Emulator build outputs and downloaded images
+/mini-rv32ima/mini-rv32ima
+/mini-rv32ima/mini-rv32ima.tiny
+/mini-rv32ima/mini-rv32ima.flt
+/mini-rv32ima/bintoh
+/mini-rv32ima/bintoh.c
+/mini-rv32ima/DownloadedImage
+/mini-rv32ima/Image.ProfileTest
+/mini-rv32ima/Image.ProfileTest-linux-*.zip
+/mini-rv32ima/Image-emdoom-*
+/mini-rv32ima/linux-*-rv32nommu-*.zip
+/mini-rv32ima/fw_payload.S
+/mini-rv32ima/fw_payload.t
+
+# Bare-metal outputs
+/baremetal/*.bin
+/baremetal/*.debug.txt
+/baremetal/*.elf
+
+# Linux example outputs
+/hello_linux/hello_linux
+/hello_linux/hello_linux.S
+/hello_linux/hello_linux.gdb
+/hello_linux/pi
+/hello_linux/pi.S
+/hello_linux/pi.gdb
+
+# Package/example outputs
+/cachetest/cachetest
+/experiments/emdoom/emdoom_listing.txt
+/experiments/emdoom/output.map
+/packages/coremark/coremark
+/packages/coremark/coremark.S
+/packages/coremark/coremark.gdb
+/packages/coremark/coremark-1.01/
+/packages/coremark/v1.01.zip
+
+# Generic local/editor noise
+*.o
+*~
+.DS_Store

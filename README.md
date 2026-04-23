@@ -1,5 +1,7 @@
 # riscv_emufun (mini-rv32ima)
 
+[中文 README](README.zh-CN.md)
+
 Click below for the YouTube video introducing this project:
 
 [![Writing a Really Tiny RISC-V Emulator](https://img.youtube.com/vi/YT5vB3UqU_E/0.jpg)](https://www.youtube.com/watch?v=YT5vB3UqU_E) [![But Will It Run Doom?](https://img.youtube.com/vi/uZMNK17VCMU/0.jpg)](https://www.youtube.com/watch?v=uZMNK17VCMU) 
@@ -56,6 +58,12 @@ Linux instructions (both):
 
 You can do in-depth work on Linux by:
  * `make everything`
+
+Or use the Docker helper:
+ * `./build-docker.sh` builds the Docker image only when the Dockerfile or entrypoint changed, then runs `make everything` in `/work`.
+ * `./build-docker.sh --cmd` opens an interactive shell in `/work`.
+ * `./build-docker.sh --cmd 'make testdlimage'` runs a command in `/work`.
+ * `./build-docker.sh --rebuild` forces the image to rebuild before running the default command.
 
 If you want to play with the bare metal system, see below, or if you have the toolchain installed, just:
  * `make testbare`
@@ -130,6 +138,48 @@ If you want to use bare metal to build your binaries so you don't need buildroot
 sudo apt-get install gcc-multilib gcc-riscv64-unknown-elf make
 ```
 
+## Developing bare-metal RISC-V programs in this project
+
+The simplest starting point is the `baremetal/` directory. It builds a flat RV32 binary and runs it with the emulator. The default `baremetal/Makefile` uses the buildroot-generated toolchain, so run `./build-docker.sh` or `./build-docker.sh --cmd 'make toolchain'` once before building the bare-metal example from a clean checkout.
+
+```
+./build-docker.sh --cmd 'make testbare'
+```
+
+The important files are:
+ * `baremetal/baremetal.c`: C entry code and examples of printing through custom CSRs.
+ * `baremetal/baremetal.S`: reset/startup code that sets the stack and calls `main`.
+ * `baremetal/flatfile.lds`: linker script that controls the memory layout of the flat binary.
+ * `baremetal/Makefile`: compiler flags, linker flags, and the `baremetal.bin` output rule.
+
+For a new bare-metal program, copy or edit `baremetal/baremetal.c` and keep the startup/linker pieces unless you know you need a different memory map. Build with `make -C baremetal`, or override the toolchain with something like `make -C baremetal PREFIX=riscv64-unknown-elf-` if you have a suitable bare-metal compiler installed. Then run the resulting binary with:
+
+```
+mini-rv32ima/mini-rv32ima -f baremetal/baremetal.bin
+```
+
+The current example uses custom CSR writes for host-side output:
+ * CSR `0x138` prints a C string pointer.
+ * CSR `0x137` prints a pointer/value.
+ * CSR `0x136` prints a number.
+
+It powers off by writing `0x5555` to the `SYSCON` MMIO symbol from the linker script. If you add your own devices, extend the emulator-side MMIO/CSR handlers in `mini-rv32ima/mini-rv32ima.c` rather than putting host assumptions into the guest program.
+
+## Porting to RP2040 or ESP32
+
+mini-rv32ima is portable C, so the emulator core can be embedded in firmware for microcontrollers, but the full Linux demo is not a practical target for small MCUs.
+
+RP2040 has only 264 KiB of SRAM, so it cannot host the default Linux image or the 64 MiB style RAM configuration. A realistic RP2040 port would run only very small bare-metal RV32 programs, with a much smaller `MINI_RV32_RAM_SIZE`, a static guest memory buffer, and board-specific UART/timer glue.
+
+ESP32 is more plausible only on modules with external PSRAM, and even then it is best treated as a small bare-metal emulator target. Classic ESP32/ESP32-S2/ESP32-S3 chips can host the C emulator with enough memory work, but performance will be modest. ESP32-C3/C6 are themselves RISC-V MCUs; for those, native firmware is usually simpler than emulating another RV32 machine unless you specifically need sandboxing or compatibility.
+
+For either family, expect to:
+ * Replace file loading with firmware-embedded guest binaries or flash reads.
+ * Allocate guest RAM statically and shrink it aggressively.
+ * Replace POSIX time/file/terminal calls in `mini-rv32ima.c` with SDK APIs.
+ * Implement only the MMIO/CSR surface needed by your bare-metal guest.
+ * Avoid the Linux/buildroot path unless the target board has tens of MiB of usable RAM and storage.
+
 ## Links
  * "Hackaday Supercon 2022: Charles Lohr - Assembly in 2022: Yes! We Still Use it and Here's Why" : https://www.youtube.com/watch?v=Gelf0AyVGy4
  
@@ -189,4 +239,3 @@ https://github.com/cnlohr/buildroot/pull/1/commits/bc890f74354e7e2f2b1cf7715f6ef
 
 Use this:
 https://github.com/cnlohr/buildroot/commit/e97714621bfae535d947817e98956b112eb80a75
-

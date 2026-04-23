@@ -1,5 +1,6 @@
 FROM ubuntu:24.04
 
+ARG MINIRV32IMA_DOCKER_CONTEXT_HASH=unknown
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG ALL_PROXY
@@ -22,6 +23,8 @@ ENV LANG=C.UTF-8 \
     https_proxy=${https_proxy} \
     all_proxy=${all_proxy} \
     no_proxy=${no_proxy}
+
+LABEL org.mini-rv32ima.docker-context-hash=${MINIRV32IMA_DOCKER_CONTEXT_HASH}
 
 RUN apt-get update && apt-get install -y \
     bash \
@@ -65,4 +68,4 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["shell"]
+CMD ["make", "everything"]
