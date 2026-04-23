@@ -20,14 +20,76 @@ mini-rv32ima is a single-file-header, [mini-rv32ima.h](https://github.com/cnlohr
 
 It has a [demo wrapper](https://github.com/cnlohr/riscv_emufun/blob/master/mini-rv32ima/mini-rv32ima.c) that:
  * Implements a CLI, SYSCON, UART, DTB and Kernel image loading.
- * And it only around **250 lines** of code, itself.
+ * Is only around **250 lines** of code, itself.
  * Compiles down to a **~18kB executable** and only relies on libc.
 
-†: Zifence+RV32A are stubbed.  So, tweaks will need to be made if you want to emulate a multiprocessor system with this emulator.
+†: Fence behavior is effectively ignored, and RV32A is implemented as a simple single-core model. Tweaks will be needed if you want to emulate a multiprocessor system with this emulator.
 
 Just see the `mini-rv32ima` folder.
 
 It's "fully functional" now in that I can run Linux, apps, etc.  Compile flat binaries and drop them in an image.
+
+## Core, Dependencies and Runtime Targets
+
+This project has two separable layers: the header-only CPU core and the host-side demo wrapper.
+
+### What the header-only CPU core implements
+
+`mini-rv32ima/mini-rv32ima.h` is the reusable CPU core. It keeps a `MiniRV32IMAState` with 32 integer registers, `pc`, a small set of machine-mode CSRs, cycle/timer counters, timer compare registers, and an `extraflags` field for simplified privilege state, `WFI`, and LR/SC reservation state.
+
+The core implements a small RV32 machine intended for NOMMU guests:
+
+ * RV32I integer instructions: jumps, branches, loads/stores, and ALU operations.
+ * RV32M multiply/divide instructions. High-half multiply uses host 64-bit arithmetic unless `CUSTOM_MULH` is supplied.
+ * RV32A atomics, including `LR.W`, `SC.W`, and common word AMOs. This is a simple single-core style implementation and does not make MMIO atomics work.
+ * Zicsr CSR operations for `mscratch`, `mtvec`, `mie`, `mip`, `mepc`, `mstatus`, `mcause`, `mtval`, `cycle`, `mvendorid`, and `misa`, with hooks for other CSRs.
+ * Fence opcodes are recognized but effectively ignored.
+ * A small privileged subset: `ECALL`, `EBREAK`, `MRET`, `WFI`, trap entry, and machine timer interrupts.
+
+It does **not** implement an MMU, page tables, `satp`, virtual address translation, TLBs, compressed instructions, floating point, vector instructions, or a complete supervisor-mode environment. Memory is direct: guest physical RAM starts at `MINIRV32_RAM_IMAGE_OFFSET`, default `0x80000000`; addresses outside RAM are treated as MMIO only if they match `MINIRV32_MMIO_RANGE`, default `0x10000000` through `0x12000000`.
+
+### What `MiniRV32IMAStep` does
+
+`MiniRV32IMAStep(state, image, vProcAddress, elapsedUs, count)` advances the virtual CPU by up to `count` instructions.
+
+Each call:
+
+ * Adds `elapsedUs` to the internal timer.
+ * Sets or clears the timer interrupt pending bit in `mip`.
+ * Returns `1` immediately if the CPU is in `WFI` and no interrupt wakes it.
+ * Checks whether `mip.MTIP`, `mie.MTIE`, and `mstatus.MIE` allow a machine timer interrupt.
+ * Otherwise fetches 32-bit instructions from `image`, decodes them, executes them, writes back registers, and increments `pc`.
+ * On traps or interrupts, writes `mcause`, `mtval`, and `mepc`, updates `mstatus`, enters machine mode, and redirects execution to `mtvec`.
+ * Updates `cycle` and `pc`, then returns `0` for normal execution.
+
+The function may also return `1` for `WFI`; outer code can sleep briefly and call it again. Other host-visible behaviors, such as poweroff codes, UART output, or custom debug CSRs, are supplied by the wrapper through macros.
+
+### Embedding and platform hooks
+
+The header does not include libc headers by itself and does not call host OS APIs. The embedding program supplies fixed-width integer types, a RAM image, and optional hooks:
+
+ * `MINI_RV32_RAM_SIZE` for guest RAM size.
+ * `MINIRV32_HANDLE_MEM_STORE_CONTROL` and `MINIRV32_HANDLE_MEM_LOAD_CONTROL` for MMIO.
+ * `MINIRV32_OTHERCSR_WRITE` and `MINIRV32_OTHERCSR_READ` for custom CSRs.
+ * `MINIRV32_POSTEXEC` for post-instruction trap, interrupt, or host event handling.
+
+The default memory access macros cast `image + offset` to `uint32_t *` or `uint16_t *`. On strict-alignment MCUs, unusual endian targets, or RTOS ports, define `MINIRV32_CUSTOM_MEMORY_BUS` and provide target-safe load/store helpers.
+
+### Demo wrapper and build dependencies
+
+`mini-rv32ima/mini-rv32ima.c` is a desktop command-line wrapper around the core. It depends on libc and platform APIs for files, memory allocation, terminal input, time, and sleep. On Unix-like hosts it uses headers such as `termios`, `unistd`, `signal`, `sys/time.h`, and `sys/ioctl.h`; on Windows it uses `windows.h` and `conio.h`.
+
+The wrapper loads guest images and optional DTBs, allocates guest RAM, patches the kernel command line, and implements an 8250/16550-like UART at `0x10000000`, CLINT timer registers around `0x11004000` and `0x1100bff8`, and SYSCON at `0x11100000`.
+
+For only compiling the wrapper, a C compiler such as `gcc` or TinyCC is enough. For the Linux demo and bundled guest programs, the top-level `Makefile` also uses `git`, `make`, Buildroot host dependencies, Buildroot-generated RISC-V tools under `buildroot/output/host/bin/`, `wget`, `unzip`, and `device-tree-compiler`. The Dockerfile lists the complete practical package set for this checkout.
+
+### Bare-metal guests, RTOS hosts, and MCU ports
+
+The emulator core can run inside bare-metal firmware or an RTOS task after porting the wrapper responsibilities: provide guest RAM, a timer source for `elapsedUs`, a target-safe memory bus, MMIO/CSR handlers, and a way to supply guest binaries from flash or firmware data instead of `fopen`.
+
+The `baremetal/` directory demonstrates a guest program, not a bare-metal host port of the emulator. It places code at `0x80000000`, starts from `baremetal.S`, prints through custom CSRs `0x136`, `0x137`, and `0x138`, reads the timer at `0x1100bff8`, and powers off by writing `0x5555` to SYSCON at `0x11100000`.
+
+Small MCUs such as RP2040 or ordinary ESP32-class parts should be treated as targets for small RV32 bare-metal guests only. The full Linux path expects tens of MiB of guest RAM, a loaded kernel image and DTB, and the small MMIO surface needed by this RV32 NOMMU Linux setup.
 
 ## Why
 
@@ -65,7 +127,7 @@ Or use the Docker helper:
  * `./build-docker.sh --cmd 'make testdlimage'` runs a command in `/work`.
  * `./build-docker.sh --rebuild` forces the image to rebuild before running the default command.
 
-If you want to play with the bare metal system, see below, or if you have the toolchain installed, just:
+If you want to play with the bare metal guest example, use:
  * `make testbare`
 
 If you just want to play emdoom, and use the prebuilt image:
@@ -84,7 +146,7 @@ Everything else: Contact us on my Discord: https://discord.com/invite/CCeyWyZ
 
 ## How do I use this in my own project?
 
-You shoud not need to modify `mini-rv32ima.h`, but instead, use `mini-rv32ima.c` as a template for what you are trying to do in your own project.
+You should not need to modify `mini-rv32ima.h`, but instead, use `mini-rv32ima.c` as a template for what you are trying to do in your own project.
 
 You can override all functionality by defining the following macros. Here are examples of what `mini-rv32ima.c` does with them.  You can see the definition of the functions, or augment their definitions, by altering `mini-rv32ima.c`.
 
@@ -132,53 +194,6 @@ If you want to build the kernel yourself:
  * You *MUST* build your kernel with `MAX_ORDER` set to >12 in `buildroot/output/build/linux-5.19/include/linux/mmzone.h` if you are building your own image.
  * You CAN use the pre-existing image that is described above.
  * On Windows, it will be very slow.  Not sure why.
-
-If you want to use bare metal to build your binaries so you don't need buildroot, you can use the rv64 gcc in 32-bit mode built into Ubuntu 20.04 and up.
-```
-sudo apt-get install gcc-multilib gcc-riscv64-unknown-elf make
-```
-
-## Developing bare-metal RISC-V programs in this project
-
-The simplest starting point is the `baremetal/` directory. It builds a flat RV32 binary and runs it with the emulator. The default `baremetal/Makefile` uses the buildroot-generated toolchain, so run `./build-docker.sh` or `./build-docker.sh --cmd 'make toolchain'` once before building the bare-metal example from a clean checkout.
-
-```
-./build-docker.sh --cmd 'make testbare'
-```
-
-The important files are:
- * `baremetal/baremetal.c`: C entry code and examples of printing through custom CSRs.
- * `baremetal/baremetal.S`: reset/startup code that sets the stack and calls `main`.
- * `baremetal/flatfile.lds`: linker script that controls the memory layout of the flat binary.
- * `baremetal/Makefile`: compiler flags, linker flags, and the `baremetal.bin` output rule.
-
-For a new bare-metal program, copy or edit `baremetal/baremetal.c` and keep the startup/linker pieces unless you know you need a different memory map. Build with `make -C baremetal`, or override the toolchain with something like `make -C baremetal PREFIX=riscv64-unknown-elf-` if you have a suitable bare-metal compiler installed. Then run the resulting binary with:
-
-```
-mini-rv32ima/mini-rv32ima -f baremetal/baremetal.bin
-```
-
-The current example uses custom CSR writes for host-side output:
- * CSR `0x138` prints a C string pointer.
- * CSR `0x137` prints a pointer/value.
- * CSR `0x136` prints a number.
-
-It powers off by writing `0x5555` to the `SYSCON` MMIO symbol from the linker script. If you add your own devices, extend the emulator-side MMIO/CSR handlers in `mini-rv32ima/mini-rv32ima.c` rather than putting host assumptions into the guest program.
-
-## Porting to RP2040 or ESP32
-
-mini-rv32ima is portable C, so the emulator core can be embedded in firmware for microcontrollers, but the full Linux demo is not a practical target for small MCUs.
-
-RP2040 has only 264 KiB of SRAM, so it cannot host the default Linux image or the 64 MiB style RAM configuration. A realistic RP2040 port would run only very small bare-metal RV32 programs, with a much smaller `MINI_RV32_RAM_SIZE`, a static guest memory buffer, and board-specific UART/timer glue.
-
-ESP32 is more plausible only on modules with external PSRAM, and even then it is best treated as a small bare-metal emulator target. Classic ESP32/ESP32-S2/ESP32-S3 chips can host the C emulator with enough memory work, but performance will be modest. ESP32-C3/C6 are themselves RISC-V MCUs; for those, native firmware is usually simpler than emulating another RV32 machine unless you specifically need sandboxing or compatibility.
-
-For either family, expect to:
- * Replace file loading with firmware-embedded guest binaries or flash reads.
- * Allocate guest RAM statically and shrink it aggressively.
- * Replace POSIX time/file/terminal calls in `mini-rv32ima.c` with SDK APIs.
- * Implement only the MMIO/CSR surface needed by your bare-metal guest.
- * Avoid the Linux/buildroot path unless the target board has tens of MiB of usable RAM and storage.
 
 ## Links
  * "Hackaday Supercon 2022: Charles Lohr - Assembly in 2022: Yes! We Still Use it and Here's Why" : https://www.youtube.com/watch?v=Gelf0AyVGy4
